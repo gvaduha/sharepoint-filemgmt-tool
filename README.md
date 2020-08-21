@@ -1,4 +1,7 @@
 ﻿# Sharepoint crossplatform multithreaded file management tool
+  
+[![License](http://img.shields.io/badge/license-mit-blue.svg?style=flat-square)](https://raw.githubusercontent.com/json-iterator/go/master/LICENSE)
+[![Build Status](https://travis-ci.org/gvaduha/sharepoint-filemgmt-tool.svg?branch=master)](https://travis-ci.org/gvaduha/sharepoint-filemgmt-tool)
 
 Sometimes you have to share files, especially large using Sharepoint (tm).
 It's mostly diabolic practic but we have to obey the rules.
