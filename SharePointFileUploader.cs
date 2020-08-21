@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -14,8 +15,19 @@ namespace gvaduha.Sharepoint
 	/// <summary>
 	/// Handle share point file operations
 	/// </summary>
-    public class SharePointFileUploader : IDisposable
+    public class SharePointFileMgr : IDisposable
     {
+		/// <summary>
+		/// Operation to execute
+		/// </summary>
+		public enum Operation
+        {
+			Upload,
+			Download,
+			Remove,
+			List
+        }
+
 		/// <summary>
 		/// This request returns authentication cookie. Ad hoc error handling.
 		/// check wsdl @ severUri//_vti_bin/authentication.asmx
@@ -86,7 +98,7 @@ namespace gvaduha.Sharepoint
 		/// <param name="serverFolderPath">path to actual document folder: /shared documents/myfolder</param>
 		/// <param name="credentials">Sharepoint user credentials</param>
 		/// <param name="chunkSize">Sharepoint limit for upload (default 1M)</param>
-		public SharePointFileUploader(string serverRootUri, string serverFolderPath, BasicCredentials credentials, int chunkSize = 1024*1024)
+		public SharePointFileMgr(string serverRootUri, string serverFolderPath, BasicCredentials credentials, int chunkSize = 1024*1024)
         {
 			_serverRootUri = serverRootUri;
 			_serverFolderPath = serverFolderPath;
@@ -106,7 +118,7 @@ namespace gvaduha.Sharepoint
 		/// Fork call it to provide support for multithreaded operation
 		/// </summary>
 		/// <param name="proto">Object prototype</param>
-		private SharePointFileUploader(SharePointFileUploader proto)
+		private SharePointFileMgr(SharePointFileMgr proto)
 		{
 			_serverRootUri = proto._serverRootUri;
 			_serverFolderPath = proto._serverFolderPath;
@@ -121,10 +133,75 @@ namespace gvaduha.Sharepoint
 		}
 
 		/// <summary>
+		/// Perform sharepoint file operation on set of files
+		/// </summary>
+		/// <param name="op">operation type</param>
+		/// <param name="files">files or directories for list</param>
+		/// <returns></returns>
+		public async Task<string> PerformAsync(Operation op, IEnumerable<string> files)
+        {
+			if (files.Count() == 1)
+            {
+				return await PerformAsync(op, files.ElementAt(0));
+            }
+            else
+            {
+				var schedule = files.Select(f => new {engine = Fork(), file = f});
+				var uploads = schedule.Select(x => x.engine.PerformAsync(op, x.file));
+				var result = await Task.WhenAll(uploads.ToArray());
+
+				return string.Join(Environment.NewLine, result);
+			}
+        }
+
+        /// <summary>
+        /// Perform sharepoint file operation on file
+        /// </summary>
+        /// <param name="op">operation type</param>
+        /// <param name="file">file name</param>
+        /// <returns></returns>
+        public async Task<string> PerformAsync(Operation op, string file)
+        {
+			Func<string, Task<string>> fn;
+
+			switch (op)
+            {
+				case Operation.Upload:
+					fn = async (f) => 
+					{
+						var r = await UploadAsync(f);
+						return Encoding.UTF8.GetString(r);
+					};
+					break;
+				case Operation.Download:
+					fn = async (f) => 
+					{
+						await DownloadAsync(f);
+						return $"{f} - Downloaded";
+					};
+					break;
+				case Operation.Remove:
+					fn = async (f) => 
+					{
+						await RemoveAsync(f);
+						return $"{f} - Removed";
+					};
+					break;
+				case Operation.List:
+					fn = ListAsync;
+					break;
+				default:
+					throw new ApplicationException("Unexpected operation");
+            }
+
+			return await fn(file);
+        }
+
+		/// <summary>
 		/// WebClient isn't support for async operations, so Fork return new instance of class with new WebClient
 		/// </summary>
-		/// <returns>SharePointFileUploader object with new aggregated WebClient object</returns>
-		public SharePointFileUploader Fork() => new SharePointFileUploader(this);
+		/// <returns>SharePointFileMgr object with new aggregated WebClient object</returns>
+		public SharePointFileMgr Fork() => new SharePointFileMgr(this);
 
 		/// <summary>
 		/// Upload files to the server
@@ -215,6 +292,24 @@ namespace gvaduha.Sharepoint
 
 			return new Uri($"{prefix}/ContinueUpload(uploadId=guid'{uploadGuid}',fileOffset={currentOffset})");
 		}
+
+		public Task DownloadAsync(string filePath)
+        {
+			//_webClient.DownloadFile()
+			throw new NotImplementedException();
+        }
+
+		public Task RemoveAsync(string filePath)
+        {
+			//_webClient.DownloadFile()
+			throw new NotImplementedException();
+        }
+
+		public Task<string> ListAsync(string filePath)
+        {
+			//_webClient.DownloadFile()
+			throw new NotImplementedException();
+        }
 
         public void Dispose()
         {
