@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 
@@ -41,7 +40,9 @@ namespace gvaduha.Sharepoint
 			{
 				if (!cfgProvider.TryGet("serverRootUri", out serverRootUri))
 					throw new ApplicationException("no server root uri");
+				
 				cfgProvider.TryGet("serverFolderUri", out serverFolderUri);
+
 				if (!cfgProvider.TryGet("userName", out userName))
 					throw new ApplicationException("userName is not specified");
 				if (!cfgProvider.TryGet("password", out password))
@@ -52,31 +53,30 @@ namespace gvaduha.Sharepoint
 				else if(cfgProvider.TryGet("download", out fileMask))
 					operation = SharePointFileMgr.Operation.Download;
 				else if(cfgProvider.TryGet("remove", out fileMask))
-					operation = SharePointFileMgr.Operation.Upload;
-				
-				cfgProvider.TryGet("list", out fileMask);
-
-				if (operation != SharePointFileMgr.Operation.List)
-                {
-					files = Directory.GetDirectories(".", fileMask ?? "*");
-					if (files.Count() == 0)
-						files = new List<string>{""};
-                }
+					operation = SharePointFileMgr.Operation.Remove;
 				else
+					cfgProvider.TryGet("list", out fileMask);
+
+				if (operation == SharePointFileMgr.Operation.Upload)
 				{
 					files = Directory.GetFiles(".", fileMask ?? "*");
 					if (files.Count() == 0)
 						throw new ApplicationException("empty file set");
 				}
+				else if (operation == SharePointFileMgr.Operation.Download || operation == SharePointFileMgr.Operation.Remove)
+					files = new List<string> { fileMask ?? "*" };
+				else
+					files = new List<string> { fileMask ?? "" };
 			}
 			catch (ApplicationException e)
             {
 				Console.WriteLine($"Error: {e.Message}{Environment.NewLine}");
 				var module = System.Diagnostics.Process.GetCurrentProcess().MainModule.ModuleName;
-				Console.WriteLine($"use:{Environment.NewLine}\t{module} -s serverRootUri [-f serverFolderPath] -u userName -p password -OPERATION [fileMask]");
-				Console.WriteLine($"\toperations: -U upload, -D download, -R remove, -L list (list is default if no op specified, but can take a list of directories to ls");
+				Console.WriteLine($"use:{Environment.NewLine}\t{module} -s serverRootUri [-f serverFolder] -u userName -p password -OPERATION [mask]");
+				Console.WriteLine($"\toperations: -U upload, -D download, -R remove, -L list (list is default if no op specified");
 				Console.WriteLine($"\t\t --up upload, --down download, --rm remove, --ls list");
-				Console.WriteLine($"List is default, if no op specified, but can take a list of directories to ls. If no filemask specified '*' considered");
+				Console.WriteLine($"\t\t List is default, if no op specified, but can take a list of directories to ls.");
+				Console.WriteLine($"\t\t Mask can use glob patterns. If no filemask specified '*' considered");
 				Console.WriteLine($"\tnote: serverFolderPath should(?) be prefixed with 'Shared Documents'");
 
 				return 1;
@@ -84,21 +84,12 @@ namespace gvaduha.Sharepoint
 
 			try
 			{
-				var filemgr = new SharePointFileMgr(serverRootUri, serverFolderUri,
+				var filemgr = new SharePointFileMgr(serverRootUri, serverFolderUri ?? "",
 															new SharePointFileMgr.BasicCredentials(userName, password));
 
-				if (files.Count() == 1)
-                {
-					await filemgr.UploadAsync(files.ElementAt(0));
-                }
-                else
-                {
-					var schedule = files.Select(f => new {engine = filemgr.Fork(), file = f});
-					var uploads = schedule.Select(x => x.engine.UploadAsync(x.file));
-					var result = await Task.WhenAll(uploads.ToArray());
+				var result = await filemgr.PerformAsync(operation, files);
 
-					//result.ToList().ForEach(x => Console.WriteLine(Encoding.UTF8.GetString(x)));
-				}
+				Console.WriteLine(result);
 			}
 			catch (Exception e)
             {

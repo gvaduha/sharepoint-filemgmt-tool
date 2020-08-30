@@ -64,8 +64,8 @@ namespace gvaduha.Sharepoint
 		/// </summary>
 		protected string GetFormDigest()
         {
-            //_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
-            var resp = _webClient.UploadData(new Uri($"{_serverRootUri}/_api/ContextInfo"), new byte[0]);
+			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+            var resp = _webClient.UploadData($"{_serverRootUri}/_api/ContextInfo", new byte[0]);
 			JObject retObj = (JObject) JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
 			return retObj.GetValue("FormDigestValue").ToString();
         }
@@ -107,7 +107,6 @@ namespace gvaduha.Sharepoint
 			_authCookie = Authenticate(serverRootUri, credentials.UserName, credentials.Password);
 			_webClient = new WebClient();
 			_webClient.Headers.Add(HttpRequestHeader.Cookie, $"{_authCookie.Name}={_authCookie.Value}");
-			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
 
 			_formDigest = GetFormDigest();
 			_webClient.Headers.Add("x-requestdigest", _formDigest);
@@ -128,7 +127,6 @@ namespace gvaduha.Sharepoint
 
 			_webClient = new WebClient();
 			_webClient.Headers.Add(HttpRequestHeader.Cookie, $"{_authCookie.Name}={_authCookie.Value}");
-			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
 			_webClient.Headers.Add("x-requestdigest", _formDigest);
 		}
 
@@ -136,17 +134,26 @@ namespace gvaduha.Sharepoint
 		/// Perform sharepoint file operation on set of files
 		/// </summary>
 		/// <param name="op">operation type</param>
-		/// <param name="files">files or directories for list</param>
+		/// <param name="items">files for upload, directories for list, remote files mask for download and remove</param>
 		/// <returns></returns>
-		public async Task<string> PerformAsync(Operation op, IEnumerable<string> files)
+		public async Task<string> PerformAsync(Operation op, IEnumerable<string> items)
         {
-			if (files.Count() == 1)
-            {
-				return await PerformAsync(op, files.ElementAt(0));
-            }
-            else
-            {
-				var schedule = files.Select(f => new {engine = Fork(), file = f});
+			// transform items to actual remote files for download and remove
+			if (op == Operation.Download || op == Operation.Remove)
+			{
+				var remotefiles = await ListAsync("");
+				var filter = Regex.Escape(items.First()).Replace(@"\*", ".*").Replace(@"\?", ".");
+				var regex = new Regex(filter);
+				items = remotefiles.ToList().Where(x => regex.IsMatch(x));
+			}
+
+			if (items.Count() == 1)
+			{
+				return await PerformAsync(op, items.First());
+			}
+			else
+			{
+				var schedule = items.Select(f => new {engine = Fork(), file = f});
 				var uploads = schedule.Select(x => x.engine.PerformAsync(op, x.file));
 				var result = await Task.WhenAll(uploads.ToArray());
 
@@ -162,6 +169,8 @@ namespace gvaduha.Sharepoint
         /// <returns></returns>
         public async Task<string> PerformAsync(Operation op, string file)
         {
+			Func<Func<string>, string> xxx = (fx) => fx();
+
 			Func<string, Task<string>> fn;
 
 			switch (op)
@@ -188,13 +197,32 @@ namespace gvaduha.Sharepoint
 					};
 					break;
 				case Operation.List:
-					fn = ListAsync;
+					fn = async (f) =>
+					{
+						var r = await ListAsync(f, true);
+						return string.Join(Environment.NewLine, r);
+					};
 					break;
 				default:
 					throw new ApplicationException("Unexpected operation");
             }
 
-			return await fn(file);
+			Func<Func<string, Task<string>>, Func<string, Task<string>>> exwrap = (fn) =>
+			{
+				return async (arg) =>
+				{
+					try
+					{
+						return await fn(arg);
+					}
+					catch (Exception e)
+					{
+						return $"{arg.ToString()}: {e.Message}";
+					}
+				};
+			};
+
+			return await exwrap(fn)(file);
         }
 
 		/// <summary>
@@ -230,6 +258,7 @@ namespace gvaduha.Sharepoint
         {
 			string serverRelativeUrl;
 			{
+				_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
 				var resp = _webClient.UploadData(GetUploadUri(filePath), new byte[0]);
 				JObject retObj = (JObject)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
 
@@ -252,8 +281,8 @@ namespace gvaduha.Sharepoint
 					if (lastChunk)
 						Array.Resize(ref buff, readCnt);
 
-					var chunkedUploadUri = GetChunkedUploadUri(serverRelativeUrl, uploadGuid, currentOffset, lastChunk);
-					result = await UploadImpl(chunkedUploadUri, buff);
+					var uri = GetChunkedUploadUri(serverRelativeUrl, uploadGuid, currentOffset, lastChunk);
+					result = await UploadImpl(uri, buff);
 					currentOffset += readCnt;
 				}
 			}
@@ -261,7 +290,7 @@ namespace gvaduha.Sharepoint
 			return result;
 		}
 
-		protected Task<byte[]> UploadImpl(Uri uri, byte[] data, int retries = 3)
+		protected Task<byte[]> UploadImpl(string uri, byte[] data, int retries = 3)
 		{
 			{
 				try
@@ -277,39 +306,69 @@ namespace gvaduha.Sharepoint
 			while (true);
 		}
 
-		protected Uri GetUploadUri(string filePath) =>
-			new Uri($"{_serverRootUri}/_api/web/getfolderbyserverrelativeurl('{_serverFolderPath}')/files/add(url='{Path.GetFileName(filePath)}',overwrite=true)");
+		protected string GetFullFolderPath(string folder) =>
+			$"{_serverRootUri}/_api/web/getfolderbyserverrelativeurl('{folder}')";
 
-		protected Uri GetChunkedUploadUri(string relativeUrl, Guid uploadGuid, long currentOffset, bool lastChunk)
+		protected string GetFullFilePath(string relativeUrl) =>
+			$"{_serverRootUri}/_api/web/getfilebyserverrelativepath(decodedurl='{relativeUrl}')";
+
+		protected string GetUploadUri(string filePath) =>
+			$"{GetFullFolderPath(_serverFolderPath)}/files/add(url='{Path.GetFileName(filePath)}',overwrite=true)";
+
+		protected string GetChunkedUploadUri(string relativeUrl, Guid uploadGuid, long currentOffset, bool lastChunk)
 		{
-			string prefix = $"{_serverRootUri}/_api/Web/GetFileByServerRelativePath(decodedurl='{relativeUrl}')";
+			string prefix = GetFullFilePath(relativeUrl);
 
 			if (0L == currentOffset)
-				return new Uri($"{prefix}/StartUpload(uploadId=guid'{uploadGuid}')");
+				return $"{prefix}/startupload(uploadid=guid'{uploadGuid}')";
 
 			if (lastChunk)
-				return new Uri($"{prefix}/FinishUpload(uploadId=guid'{uploadGuid}',fileOffset={currentOffset})");
+				return $"{prefix}/finishupload(uploadid=guid'{uploadGuid}',fileoffset={currentOffset})";
 
-			return new Uri($"{prefix}/ContinueUpload(uploadId=guid'{uploadGuid}',fileOffset={currentOffset})");
+			return $"{prefix}/continueupload(uploadid=guid'{uploadGuid}',fileoffset={currentOffset})";
 		}
 
 		public Task DownloadAsync(string filePath)
         {
-			//_webClient.DownloadFile()
-			throw new NotImplementedException();
-        }
+			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			return _webClient.DownloadFileTaskAsync($"{_serverRootUri}/{_serverFolderPath}/{filePath}", filePath);
+		}
 
 		public Task RemoveAsync(string filePath)
         {
-			//_webClient.DownloadFile()
-			throw new NotImplementedException();
+			var req = HttpWebRequest.Create($"{_serverRootUri}/{_serverFolderPath}/{filePath}") as HttpWebRequest;
+			req.Method = "DELETE";
+			req.Headers.Add(HttpRequestHeader.Cookie, $"{_authCookie.Name}={_authCookie.Value}");
+			req.Headers.Add("x-requestdigest", _formDigest);
+			return req.GetResponseAsync();
         }
 
-		public Task<string> ListAsync(string filePath)
+		public async Task<IEnumerable<string>> ListAsync(string filePath, bool includeFolders = false)
         {
-			//_webClient.DownloadFile()
-			throw new NotImplementedException();
-        }
+			var uri = $"{GetFullFolderPath($"{_serverFolderPath}/{filePath}")}/files?$select=name&$orderby=name";
+
+			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			var resp = await _webClient.DownloadDataTaskAsync(uri);
+
+			JObject retObj = (JObject) JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
+
+			var files =  retObj["value"].Select(x => x["Name"].ToString());
+
+			if (includeFolders)
+            {
+				uri = $"{GetFullFolderPath($"{_serverFolderPath}/{filePath}")}/?$expand=folders";
+				_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+				resp = await _webClient.DownloadDataTaskAsync(uri);
+
+				retObj = (JObject)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
+
+				var folders = retObj["Folders"].Select(x => $"[{x["Name"].ToString()}]");
+
+				return folders.Concat(files);
+			}
+
+			return files;
+		}
 
         public void Dispose()
         {

@@ -4,6 +4,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <RootNamespace>gvaduha.Sharepoint</RootNamespace>
+    <AssemblyName>shrpnt-fm</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
