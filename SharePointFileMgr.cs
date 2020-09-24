@@ -51,7 +51,7 @@ namespace gvaduha.Sharepoint
 				sw.Write(string.Format(envelopeFormat, userName, System.Security.SecurityElement.Escape(password)));
 			using (var response = req.GetResponse() as HttpWebResponse)
 			{
-				if (response.Cookies.Count() == 0)
+				if (response.Cookies.Count == 0)
 					throw new ApplicationException("authentication failed");
 
 				return response.Cookies[0];
@@ -207,13 +207,13 @@ namespace gvaduha.Sharepoint
 					throw new ApplicationException("Unexpected operation");
             }
 
-			Func<Func<string, Task<string>>, Func<string, Task<string>>> exwrap = (fn) =>
+			Func<Func<string, Task<string>>, Func<string, Task<string>>> exwrap = (f) =>
 			{
 				return async (arg) =>
 				{
 					try
 					{
-						return await fn(arg);
+						return await f(arg);
 					}
 					catch (Exception e)
 					{
