@@ -58,13 +58,22 @@ namespace gvaduha.Sharepoint
 			}
 		}
 
+		private static void SetContentHeaderToJsonTrick(WebClient webClient)
+        {
+			#if NETFRAMEWORK
+				webClient.Headers.Add(HttpRequestHeader.Accept, "application/json");
+			#else
+				webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			#endif
+        }
+
 		/// <summary>
 		/// Return form digest that is essential for share point operation
 		/// https://stackoverflow.com/questions/22159609/how-to-get-request-digest-value-from-provider-hosted-app
 		/// </summary>
 		protected string GetFormDigest()
         {
-			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			SetContentHeaderToJsonTrick(_webClient);
             var resp = _webClient.UploadData($"{_serverRootUri}/_api/ContextInfo", new byte[0]);
 			JObject retObj = (JObject) JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
 			return retObj.GetValue("FormDigestValue").ToString();
@@ -258,7 +267,7 @@ namespace gvaduha.Sharepoint
         {
 			string serverRelativeUrl;
 			{
-				_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+				SetContentHeaderToJsonTrick(_webClient);
 				var resp = _webClient.UploadData(GetUploadUri(filePath), new byte[0]);
 				JObject retObj = (JObject)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
 
@@ -330,7 +339,7 @@ namespace gvaduha.Sharepoint
 
 		public Task DownloadAsync(string filePath)
         {
-			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			SetContentHeaderToJsonTrick(_webClient);
 			return _webClient.DownloadFileTaskAsync($"{_serverRootUri}/{_serverFolderPath}/{filePath}", filePath);
 		}
 
@@ -347,7 +356,7 @@ namespace gvaduha.Sharepoint
         {
 			var uri = $"{GetFullFolderPath($"{_serverFolderPath}/{filePath}")}/files?$select=name&$orderby=name";
 
-			_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+			SetContentHeaderToJsonTrick(_webClient);
 			var resp = await _webClient.DownloadDataTaskAsync(uri);
 
 			JObject retObj = (JObject) JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));
@@ -357,7 +366,7 @@ namespace gvaduha.Sharepoint
 			if (includeFolders)
             {
 				uri = $"{GetFullFolderPath($"{_serverFolderPath}/{filePath}")}/?$expand=folders";
-				_webClient.Headers.Add(HttpRequestHeader.Accept, MediaTypeNames.Application.Json);
+				SetContentHeaderToJsonTrick(_webClient);
 				resp = await _webClient.DownloadDataTaskAsync(uri);
 
 				retObj = (JObject)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(resp));

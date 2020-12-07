@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>netcoreapp2.1;netcoreapp3.1</TargetFrameworks>
+    <TargetFrameworks>netcoreapp2.1;netcoreapp3.1;net472</TargetFrameworks>
     <RootNamespace>gvaduha.Sharepoint</RootNamespace>
     <AssemblyName>shrpnt-fm</AssemblyName>
   </PropertyGroup>
